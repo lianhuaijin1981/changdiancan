@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMerchant } from "../context/MerchantContext";
 import { api } from "../api/client";
-import { Check, Palette, ArrowLeft, Sparkles, Flame, Leaf, Crown } from "lucide-react";
+import { Check, Palette, ArrowLeft, Sparkles, Flame, Leaf, Crown, TreePine, Beef, Sun } from "lucide-react";
 
 const TEMPLATES = [
   {
@@ -40,6 +40,33 @@ const TEMPLATES = [
     icon: Crown,
     colors: ["#0F0F0F", "#C9A962", "#1A1A1A"],
     features: ["极简留白", "大字体", "高级感"],
+  },
+  {
+    id: "japanese",
+    name: "日式和风",
+    desc: "原木质感配靛蓝，大量留白，适合寿司、拉面、居酒屋",
+    category: ["日料", "寿司", "拉面", "居酒屋", "定食"],
+    icon: TreePine,
+    colors: ["#4A6741", "#2F5491", "#FAF8F3"],
+    features: ["原木质感", "大量留白", "自然和风"],
+  },
+  {
+    id: "korean",
+    name: "韩式烤肉",
+    desc: "炭黑配火焰红，工业风设计，适合韩式烤肉、炸鸡、部队锅",
+    category: ["韩式烤肉", "炸鸡", "部队锅", "韩餐", "大排档"],
+    icon: Beef,
+    colors: ["#D9381E", "#1A1A1A", "#2A2A2A"],
+    features: ["炭火氛围", "工业风格", "热力十足"],
+  },
+  {
+    id: "southeast",
+    name: "东南亚风情",
+    desc: "热带绿配芒果黄，鲜艳印花感，适合泰餐、越南粉、马来菜",
+    category: ["泰国菜", "越南粉", "马来菜", "印度菜", "新加坡菜"],
+    icon: Sun,
+    colors: ["#2D7D46", "#F9A825", "#FFFDE7"],
+    features: ["热带氛围", "鲜艳活泼", "热情好客"],
   },
 ];
 

@@ -6,12 +6,18 @@ import ModernHome from "./modern/Home";
 import TraditionalHome from "./traditional/Home";
 import FreshHome from "./fresh/Home";
 import LuxuryHome from "./luxury/Home";
+import JapaneseHome from "./japanese/Home";
+import KoreanHome from "./korean/Home";
+import SoutheastHome from "./southeast/Home";
 
 const homeComponents: Record<string, React.ComponentType> = {
   modern: ModernHome,
   traditional: TraditionalHome,
   fresh: FreshHome,
   luxury: LuxuryHome,
+  japanese: JapaneseHome,
+  korean: KoreanHome,
+  southeast: SoutheastHome,
 };
 
 export function TemplateHome() {
