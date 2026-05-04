@@ -10,6 +10,7 @@ import Tables from "./pages/Tables";
 import Stats from "./pages/Stats";
 import Settings from "./pages/Settings";
 import TemplateSelect from "./pages/TemplateSelect";
+import RiderManage from "./pages/RiderManage";
 import Layout from "./components/Layout";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -32,6 +33,7 @@ export default function MerchantApp() {
         <Route path="stats" element={<Stats />} />
         <Route path="settings" element={<Settings />} />
         <Route path="template" element={<TemplateSelect />} />
+        <Route path="riders" element={<RiderManage />} />
       </Route>
     </Routes>
   );

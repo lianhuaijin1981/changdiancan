@@ -235,6 +235,7 @@ class Rider(Base):
     __tablename__ = "riders"
 
     id = Column(Integer, primary_key=True, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False, comment="所属门店")
     name = Column(String(50), nullable=False)
     phone = Column(String(20), nullable=False)
     password_hash = Column(String(128), nullable=False)

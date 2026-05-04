@@ -15,6 +15,7 @@ import {
   Info,
   Settings,
   Palette,
+  Bike,
 } from "lucide-react";
 
 interface StoreInfo {
@@ -80,6 +81,11 @@ export default function SettingsPage() {
       label: "小程序模板",
       icon: Palette,
       onClick: () => navigate("/merchant/template"),
+    },
+    {
+      label: "骑手管理",
+      icon: Bike,
+      onClick: () => navigate("/merchant/riders"),
     },
     {
       label: "门店设置",

@@ -8,6 +8,8 @@ import Contact from './pages/Contact'
 import MiniAppShell from './miniapp'
 import AdminShell from './admin'
 import MerchantShell from './merchant'
+import SuperAdminShell from './superadmin'
+import RiderShell from './rider'
 
 export default function App() {
   return (
@@ -26,6 +28,10 @@ export default function App() {
       <Route path="/admin/*" element={<AdminShell />} />
       {/* Merchant mobile management */}
       <Route path="/merchant/*" element={<MerchantShell />} />
+      {/* Super admin dashboard */}
+      <Route path="/superadmin/*" element={<SuperAdminShell />} />
+      {/* Rider delivery app */}
+      <Route path="/rider/*" element={<RiderShell />} />
     </Routes>
   )
 }
