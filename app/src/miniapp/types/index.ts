@@ -34,6 +34,7 @@ export interface Dish {
   specs: DishSpec[];
   is_featured: boolean;
   sales_count: number;
+  stock?: number;
 }
 
 export interface CartItem {

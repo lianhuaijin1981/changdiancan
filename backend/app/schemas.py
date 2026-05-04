@@ -441,6 +441,50 @@ class MemberStats(BaseModel):
     avg_consumption: float
 
 
+# ============== 审计日志相关 ==============
+
+class AuditLogCreate(BaseModel):
+    user_id: Optional[int] = None
+    user_type: Optional[str] = "user"
+    action: str = Field(..., min_length=1, max_length=50)
+    target_type: Optional[str] = ""
+    target_id: Optional[int] = None
+    detail: Optional[str] = ""
+    ip_address: Optional[str] = ""
+
+
+class AuditLogResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    user_id: Optional[int] = None
+    user_type: str
+    action: str
+    target_type: Optional[str] = None
+    target_id: Optional[int] = None
+    detail: Optional[str] = None
+    ip_address: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
+# ============== 库存相关 ==============
+
+class InventoryLowStockFilter(BaseModel):
+    store_id: int
+    threshold: Optional[int] = 10
+
+
+class InventorySummary(BaseModel):
+    store_id: int
+    total_items: int
+    low_stock_count: int
+    out_of_stock_count: int
+    threshold: int
+
+
+class StockUpdateRequest(BaseModel):
+    quantity: int = Field(..., ge=0, description="新库存数量")
+
+
 # ============== 轮播图相关 ==============
 
 class BannerCreate(BaseModel):

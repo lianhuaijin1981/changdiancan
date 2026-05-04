@@ -105,7 +105,17 @@ export default function RiderOrders() {
 
               <div className="flex items-start gap-2 text-xs text-gray-400 mb-3">
                 <MapPin size={14} className="mt-0.5 shrink-0" />
-                <span>{order.delivery_address}</span>
+                <span className="flex-1">{order.delivery_address}</span>
+                <button
+                  onClick={() => {
+                    const tencentUrl = `https://apis.map.qq.com/uri/v1/routeplan?type=drive&to=${encodeURIComponent(order.delivery_address)}&referer=canting`;
+                    window.open(tencentUrl, "_blank");
+                  }}
+                  className="flex items-center gap-1 px-2 py-1 bg-[#D9381E]/10 text-[#D9381E] rounded-lg font-medium shrink-0 active:opacity-70"
+                >
+                  <Navigation size={12} />
+                  导航
+                </button>
               </div>
 
               <div className="flex items-center gap-2 text-xs text-gray-400 mb-3">

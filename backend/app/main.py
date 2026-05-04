@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 # 将 backend 加入路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -39,7 +40,7 @@ async def init_default_data():
             status=1,
             logo="",
             description="畅点餐官方体验店，提供各类精品美食",
-            announcement="🎉 新店开业全场8折！会员充值满100送20！",
+            announcement="\u4e0a 新店开业全场8折！会员充值满100送20！",
             delivery_fee=5.0,
             min_delivery_amount=20.0,
             delivery_range=5.0,
@@ -130,14 +131,79 @@ async def init_default_data():
         db.close()
 
 
+# ========== APScheduler: 自动取消超时订单 ==========
+from apscheduler.schedulers.background import BackgroundScheduler
+
+scheduler = BackgroundScheduler()
+
+
+def auto_cancel_timeout_orders():
+    """自动取消超过30分钟未支付的订单，并回滚库存"""
+    from datetime import datetime, timedelta
+    from app.database import SessionLocal
+    from app.models import Order, OrderItem, Dish
+
+    db = SessionLocal()
+    try:
+        timeout = datetime.now() - timedelta(minutes=30)
+        orders = db.query(Order).filter(
+            Order.status == "pending",
+            Order.pay_status == "unpaid",
+            Order.created_at < timeout,
+        ).all()
+
+        cancelled_count = 0
+        for order in orders:
+            # 回滚库存
+            items = (
+                db.query(OrderItem)
+                .filter(OrderItem.order_id == order.id)
+                .all()
+            )
+            for item in items:
+                dish = db.query(Dish).filter(Dish.id == item.dish_id).first()
+                if dish:
+                    dish.stock += item.quantity
+
+            order.status = "cancelled"
+            order.cancel_reason = "\u8d85\u65f6\u672a\u652f\u4ed8\uff0c\u7cfb\u7edf\u81ea\u52a8\u53d6\u6d88"
+            order.updated_at = datetime.now()
+            cancelled_count += 1
+
+        if cancelled_count > 0:
+            db.commit()
+            print(f"[AutoCancel] {datetime.now().isoformat()} - "
+                  f"\u81ea\u52a8\u53d6\u6d88 {cancelled_count} \u4e2a\u8d85\u65f6\u672a\u652f\u4ed8\u8ba2\u5355")
+    except Exception as e:
+        db.rollback()
+        print(f"[AutoCancel] Error: {e}")
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时初始化
     init_db()
     await init_default_data()
+
+    # 启动定时任务：每5分钟检查一次超时订单
+    scheduler.add_job(
+        auto_cancel_timeout_orders,
+        "interval",
+        minutes=5,
+        id="auto_cancel_timeout_orders",
+        replace_existing=True,
+    )
+    scheduler.start()
+    print("[Scheduler] \u5b9a\u65f6\u4efb\u52a1\u5df2\u542f\u52a8")
+
     yield
+
     # 关闭时清理
+    scheduler.shutdown()
+    print("[Scheduler] \u5b9a\u65f6\u4efb\u52a1\u5df2\u5173\u95ed")
 
 
 # 创建 FastAPI 应用
@@ -168,7 +234,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 # 注册路由
-from app.routers import auth, store, table, category, dish, order, member, coupon, activity, payment, rider, staff, dashboard, merchant, superadmin
+from app.routers import auth, store, table, category, dish, order, member, coupon, activity, payment, rider, staff, dashboard, merchant, superadmin, audit, inventory, export, finance
 
 app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
 app.include_router(store.router, prefix="/api/stores", tags=["门店"])
@@ -185,6 +251,10 @@ app.include_router(staff.router, prefix="/api/staff", tags=["店员"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["数据统计"])
 app.include_router(merchant.router, prefix="/api/merchant", tags=["商家"])
 app.include_router(superadmin.router, prefix="/api/superadmin", tags=["超级管理员"])
+app.include_router(audit.router, prefix="/api/audit", tags=["审计日志"])
+app.include_router(inventory.router, prefix="/api/inventory", tags=["库存管理"])
+app.include_router(export.router, prefix="/api/export", tags=["导出"])
+app.include_router(finance.router, prefix="/api/finance", tags=["财务报表"])
 
 
 @app.get("/")
@@ -195,3 +265,37 @@ async def root():
 @app.get("/api/health")
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+
+# ── 打印测试 ────────────────────────────────────────────────────
+
+@app.post("/api/print/test")
+async def print_test(
+    provider: str = Query("yilianyun", description="打印服务商: yilianyun/feie"),
+    machine_code: str = Query("", description="打印机编号"),
+):
+    """测试云打印连接"""
+    from app.utils.print_service import get_cloud_printer
+
+    printer = get_cloud_printer(provider=provider)
+    result = await printer.test_print(machine_code)
+    await printer.close()
+
+    if result.get("status") == "error":
+        return {
+            "code": 200,
+            "message": "打印测试（演示模式 - 未配置真实打印服务商）",
+            "data": {
+                "status": "demo",
+                "provider": provider,
+                "machine_code": machine_code or "未设置",
+                "note": "请在环境变量中配置 CLOUD_PRINT_API_KEY 和 CLOUD_PRINT_API_SECRET 以启用真实打印",
+                "env_vars": ["CLOUD_PRINT_API_KEY", "CLOUD_PRINT_API_SECRET", "CLOUD_PRINT_PROVIDER"],
+            },
+        }
+
+    return {
+        "code": 200,
+        "message": "打印测试成功",
+        "data": result,
+    }

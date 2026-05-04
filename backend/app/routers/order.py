@@ -2,8 +2,13 @@
 畅点餐 - 订单管理路由（完整订单生命周期）
 订单状态流: pending -> paid -> preparing -> ready -> served -> completed
 异常状态: cancelled, refunding, refunded
+
+库存管理策略：
+- 创建订单时：检查库存并扣减（使用数据库行级锁 with_for_update 保证并发安全）
+- 取消/退款时：回滚库存
+- 加菜时：检查库存并扣减
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_, text
 from typing import List, Optional
@@ -72,17 +77,118 @@ def validate_status_transition(current: str, new: str) -> bool:
     return new in valid_next
 
 
+def _log_audit(
+    db: Session,
+    action: str,
+    target_type: str = "",
+    target_id: Optional[int] = None,
+    detail: str = "",
+    user_id: Optional[int] = None,
+    user_type: str = "user",
+    ip_address: str = "",
+) -> None:
+    """记录审计日志（内部工具函数）"""
+    try:
+        log = models.AuditLog(
+            user_id=user_id,
+            user_type=user_type,
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            detail=detail,
+            ip_address=ip_address,
+        )
+        db.add(log)
+        # 注意：不在这里 commit，由调用方统一提交事务
+    except Exception:
+        # 审计日志失败不应影响主业务流程
+        pass
+
+
+def _check_and_deduct_stock(db: Session, items_data: list, store_id: int) -> None:
+    """检查库存并扣减（带数据库行级锁，保证并发安全）
+
+    Args:
+        db: 数据库会话
+        items_data: 订单项数据列表，每项包含 dish_id, quantity, dish_name
+        store_id: 门店ID
+
+    Raises:
+        HTTPException: 库存不足时抛出 400 错误
+    """
+    # 使用 SELECT ... FOR UPDATE 锁定涉及的菜品行，防止并发超卖
+    dish_ids = [item["dish_id"] for item in items_data]
+    locked_dishes = {
+        d.id: d
+        for d in db.query(Dish)
+        .filter(Dish.id.in_(dish_ids), Dish.store_id == store_id)
+        .with_for_update()
+        .all()
+    }
+
+    for item in items_data:
+        dish = locked_dishes.get(item["dish_id"])
+        if not dish:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"菜品 ID {item['dish_id']} 不存在",
+            )
+        if dish.stock < item["quantity"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"菜品 '{dish.name}' 库存不足，剩余 {dish.stock}，需要 {item['quantity']}",
+            )
+        # 扣减库存
+        dish.stock -= item["quantity"]
+        # 如果库存扣完后为0，自动标记为售罄
+        if dish.stock == 0:
+            dish.status = 2
+
+
+def _restore_stock(db: Session, order_id: int) -> None:
+    """恢复订单占用的库存
+
+    Args:
+        db: 数据库会话
+        order_id: 订单ID
+    """
+    items = (
+        db.query(OrderItem)
+        .filter(OrderItem.order_id == order_id)
+        .all()
+    )
+    dish_ids = [item.dish_id for item in items]
+    locked_dishes = {
+        d.id: d
+        for d in db.query(Dish)
+        .filter(Dish.id.in_(dish_ids))
+        .with_for_update()
+        .all()
+    }
+
+    for item in items:
+        dish = locked_dishes.get(item.dish_id)
+        if dish:
+            dish.stock += item.quantity
+            # 如果之前是售罄状态，恢复库存后自动上架
+            if dish.status == 2 and dish.stock > 0:
+                dish.status = 1
+
+
 @router.post("/", response_model=schemas.ResponseModel)
 def create_order(
     order_req: schemas.OrderCreateRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_user),
 ):
     """创建订单
-    1. 校验商品和库存
+    1. 校验商品和库存（带并发锁）
     2. 计算订单金额
     3. 应用优惠券
     4. 生成订单号并创建订单
+    5. 扣减库存（原子操作）
+    6. 记录审计日志
     """
     if not order_req.items:
         raise HTTPException(
@@ -121,11 +227,6 @@ def create_order(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"菜品 ID {item.dish_id} 不存在",
             )
-        if dish.stock < item.quantity:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"菜品 '{dish.name}' 库存不足，剩余 {dish.stock}",
-            )
         if dish.status == 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -138,8 +239,10 @@ def create_order(
             for spec in dish.specs:
                 selected = item.specs.get(spec["name"], "")
                 for opt in spec.get("options", []):
-                    if opt.get("name") == selected:
+                    if isinstance(opt, dict) and opt.get("name") == selected:
                         unit_price += opt.get("extra_price", 0)
+                    elif isinstance(opt, str) and opt == selected:
+                        pass  # 字符串选项不加价
 
         subtotal = round(unit_price * item.quantity, 2)
         total_amount += subtotal
@@ -208,60 +311,88 @@ def create_order(
     if pay_amount < 0:
         pay_amount = 0.0
 
-    # 创建订单
-    order = Order(
-        order_no=generate_order_no(),
-        user_id=current_user.id if current_user else None,
-        store_id=order_req.store_id,
-        table_id=order_req.table_id,
-        order_type=order_req.order_type,
-        status="pending",
-        total_amount=total_amount,
-        discount_amount=discount_amount,
-        pay_amount=pay_amount,
-        pay_type=order_req.pay_type or "wechat",
-        pay_status="unpaid",
-        remark=order_req.remark,
-        delivery_name=order_req.delivery_name or "",
-        delivery_phone=order_req.delivery_phone or "",
-        delivery_address=order_req.delivery_address or "",
-        delivery_fee=delivery_fee,
-    )
-    db.add(order)
-    db.flush()  # 获取 order.id
+    # ========== 创建订单 + 扣减库存（原子操作） ==========
+    try:
+        # 1. 检查库存并扣减（带行级锁）
+        _check_and_deduct_stock(db, order_items_data, order_req.store_id)
 
-    # 创建订单项
-    for item_data in order_items_data:
-        item_data["order_id"] = order.id
-        db_item = OrderItem(**item_data)
-        db.add(db_item)
+        # 2. 创建订单
+        order = Order(
+            order_no=generate_order_no(),
+            user_id=current_user.id if current_user else None,
+            store_id=order_req.store_id,
+            table_id=order_req.table_id,
+            order_type=order_req.order_type,
+            status="pending",
+            total_amount=total_amount,
+            discount_amount=discount_amount,
+            pay_amount=pay_amount,
+            pay_type=order_req.pay_type or "wechat",
+            pay_status="unpaid",
+            remark=order_req.remark,
+            delivery_name=order_req.delivery_name or "",
+            delivery_phone=order_req.delivery_phone or "",
+            delivery_address=order_req.delivery_address or "",
+            delivery_fee=delivery_fee,
+        )
+        db.add(order)
+        db.flush()  # 获取 order.id
 
-        # 扣减库存
-        db.query(Dish).filter(Dish.id == item_data["dish_id"]).update(
-            {Dish.stock: Dish.stock - item_data["quantity"]}
+        # 3. 创建订单项
+        for item_data in order_items_data:
+            item_data["order_id"] = order.id
+            db_item = OrderItem(**item_data)
+            db.add(db_item)
+
+        # 4. 记录审计日志
+        client_ip = request.client.host if request and request.client else ""
+        item_names = ", ".join([i["dish_name"] for i in order_items_data])
+        _log_audit(
+            db,
+            action="create_order",
+            target_type="order",
+            target_id=order.id,
+            detail=f"创建订单 {order.order_no}，菜品: {item_names}，金额: ¥{pay_amount}",
+            user_id=current_user.id if current_user else None,
+            ip_address=client_ip,
         )
 
-    db.commit()
-    db.refresh(order)
+        # 5. 统一提交事务
+        db.commit()
+        db.refresh(order)
 
-    # 标记优惠券为已使用（如果使用了）
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"订单创建失败: {str(e)}",
+        )
+
+    # 标记优惠券为已使用（如果使用了）- 在主事务外处理，避免影响主订单
     if discount_amount > 0 and coupon_id and current_user:
-        user_coupon = (
-            db.query(UserCoupon)
-            .filter(
-                UserCoupon.user_id == current_user.id,
-                UserCoupon.coupon_id == coupon_id,
-                UserCoupon.status == "unused",
+        try:
+            user_coupon = (
+                db.query(UserCoupon)
+                .filter(
+                    UserCoupon.user_id == current_user.id,
+                    UserCoupon.coupon_id == coupon_id,
+                    UserCoupon.status == "unused",
+                )
+                .first()
             )
-            .first()
-        )
-        if user_coupon:
-            user_coupon.status = "used"
-            user_coupon.used_at = datetime.now()
-            db.query(Coupon).filter(Coupon.id == coupon_id).update(
-                {Coupon.used_count: Coupon.used_count + 1}
-            )
-            db.commit()
+            if user_coupon:
+                user_coupon.status = "used"
+                user_coupon.used_at = datetime.now()
+                db.query(Coupon).filter(Coupon.id == coupon_id).update(
+                    {Coupon.used_count: Coupon.used_count + 1}
+                )
+                db.commit()
+        except Exception:
+            db.rollback()
+            # 优惠券标记失败不影响主订单
 
     # 构建响应
     items_resp = [
@@ -491,11 +622,15 @@ def update_order_status(
 @router.post("/{id}/cancel", response_model=schemas.ResponseModel)
 def cancel_order(
     id: int,
+    request: Request,
     reason: str = "",
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_user),
 ):
-    """取消订单（仅在允许的状态下）"""
+    """取消订单（仅在允许的状态下）
+    - 未支付订单：直接取消，回滚库存
+    - 已支付订单：标记为退款中
+    """
     order = db.query(Order).filter(Order.id == id).first()
     if not order:
         raise HTTPException(
@@ -508,28 +643,43 @@ def cancel_order(
             detail=f"当前状态 '{order.status}' 不允许取消",
         )
 
-    # 恢复库存
-    items = (
-        db.query(OrderItem)
-        .filter(OrderItem.order_id == order.id)
-        .all()
-    )
-    for item in items:
-        db.query(Dish).filter(Dish.id == item.dish_id).update(
-            {Dish.stock: Dish.stock + item.quantity}
+    try:
+        # 恢复库存（带并发锁）
+        _restore_stock(db, order.id)
+
+        # 如果已支付，标记为退款中
+        if order.pay_status == "paid":
+            order.status = "refunding"
+            order.cancel_reason = reason or "用户取消"
+        else:
+            order.status = "cancelled"
+            order.cancel_reason = reason or "用户取消"
+
+        order.updated_at = datetime.now()
+
+        # 记录审计日志
+        client_ip = request.client.host if request and request.client else ""
+        _log_audit(
+            db,
+            action="cancel_order",
+            target_type="order",
+            target_id=order.id,
+            detail=f"取消订单 {order.order_no}，原因: {order.cancel_reason}，库存已回滚",
+            user_id=current_user.id if current_user else None,
+            ip_address=client_ip,
         )
 
-    # 如果已支付，标记为退款
-    if order.pay_status == "paid":
-        order.status = "refunding"
-        order.cancel_reason = reason or "用户取消"
-    else:
-        order.status = "cancelled"
-        order.cancel_reason = reason or "用户取消"
-
-    order.updated_at = datetime.now()
-    db.commit()
-    db.refresh(order)
+        db.commit()
+        db.refresh(order)
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"取消订单失败: {str(e)}",
+        )
 
     return {
         "code": 200,
@@ -545,10 +695,14 @@ def cancel_order(
 @router.post("/{id}/refund", response_model=schemas.ResponseModel)
 def refund_order(
     id: int,
+    request: Request,
     reason: str = "",
     db: Session = Depends(get_db),
 ):
-    """订单退款"""
+    """订单退款
+    - 恢复库存
+    - 创建退款记录
+    """
     order = db.query(Order).filter(Order.id == id).first()
     if not order:
         raise HTTPException(
@@ -578,35 +732,47 @@ def refund_order(
             detail="退款处理失败",
         )
 
-    # 恢复库存
-    items = (
-        db.query(OrderItem)
-        .filter(OrderItem.order_id == order.id)
-        .all()
-    )
-    for item in items:
-        db.query(Dish).filter(Dish.id == item.dish_id).update(
-            {Dish.stock: Dish.stock + item.quantity}
+    try:
+        # 恢复库存（带并发锁）
+        _restore_stock(db, order.id)
+
+        order.status = "refunded"
+        order.pay_status = "refunded"
+        order.cancel_reason = reason or "已退款"
+        order.updated_at = datetime.now()
+
+        # 创建支付记录
+        payment = Payment(
+            order_no=order.order_no,
+            transaction_id=refund_result.get("refund_no", ""),
+            user_id=order.user_id,
+            amount=-order.pay_amount,
+            pay_type=order.pay_type,
+            status="refunded",
+            refunded_at=datetime.now(),
+        )
+        db.add(payment)
+
+        # 记录审计日志
+        client_ip = request.client.host if request and request.client else ""
+        _log_audit(
+            db,
+            action="refund_order",
+            target_type="order",
+            target_id=order.id,
+            detail=f"退款订单 {order.order_no}，金额: ¥{order.pay_amount}，退款单号: {refund_result.get('refund_no', '')}",
+            user_id=order.user_id,
+            ip_address=client_ip,
         )
 
-    order.status = "refunded"
-    order.pay_status = "refunded"
-    order.cancel_reason = reason or "已退款"
-    order.updated_at = datetime.now()
-
-    # 创建支付记录
-    payment = Payment(
-        order_no=order.order_no,
-        transaction_id=refund_result.get("refund_no", ""),
-        user_id=order.user_id,
-        amount=-order.pay_amount,
-        pay_type=order.pay_type,
-        status="refunded",
-        refunded_at=datetime.now(),
-    )
-    db.add(payment)
-    db.commit()
-    db.refresh(order)
+        db.commit()
+        db.refresh(order)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"退款处理失败: {str(e)}",
+        )
 
     return {
         "code": 200,
@@ -682,8 +848,12 @@ def add_item_to_order(
     quantity: int = 1,
     specs: Optional[dict] = None,
     db: Session = Depends(get_db),
+    request: Request = None,
 ):
-    """临时加菜（向已有订单添加菜品）"""
+    """临时加菜（向已有订单添加菜品）
+    - 检查订单状态是否允许加菜
+    - 检查库存并扣减
+    """
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(
@@ -697,7 +867,13 @@ def add_item_to_order(
             detail=f"当前订单状态 '{order.status}' 不允许加菜",
         )
 
-    dish = db.query(Dish).filter(Dish.id == dish_id).first()
+    # 使用行级锁锁定菜品行
+    dish = (
+        db.query(Dish)
+        .filter(Dish.id == dish_id)
+        .with_for_update()
+        .first()
+    )
     if not dish:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="菜品不存在"
@@ -706,7 +882,7 @@ def add_item_to_order(
     if dish.stock < quantity:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"菜品 '{dish.name}' 库存不足",
+            detail=f"菜品 '{dish.name}' 库存不足，剩余 {dish.stock}",
         )
 
     # 计算价格（考虑规格）
@@ -715,36 +891,56 @@ def add_item_to_order(
         for spec in dish.specs:
             selected = specs.get(spec["name"], "")
             for opt in spec.get("options", []):
-                if opt.get("name") == selected:
+                if isinstance(opt, dict) and opt.get("name") == selected:
                     unit_price += opt.get("extra_price", 0)
 
     subtotal = round(unit_price * quantity, 2)
 
-    # 创建订单项
-    order_item = OrderItem(
-        order_id=order.id,
-        dish_id=dish.id,
-        dish_name=dish.name,
-        dish_image=dish.image,
-        price=unit_price,
-        quantity=quantity,
-        specs=specs or {},
-        subtotal=subtotal,
-        status="pending",
-    )
-    db.add(order_item)
+    try:
+        # 扣减库存
+        dish.stock -= quantity
+        if dish.stock == 0:
+            dish.status = 2
 
-    # 扣减库存
-    dish.stock -= quantity
+        # 创建订单项
+        order_item = OrderItem(
+            order_id=order.id,
+            dish_id=dish.id,
+            dish_name=dish.name,
+            dish_image=dish.image,
+            price=unit_price,
+            quantity=quantity,
+            specs=specs or {},
+            subtotal=subtotal,
+            status="pending",
+        )
+        db.add(order_item)
 
-    # 更新订单金额
-    order.total_amount = round(order.total_amount + subtotal, 2)
-    order.pay_amount = round(order.pay_amount + subtotal, 2)
-    order.updated_at = datetime.now()
+        # 更新订单金额
+        order.total_amount = round(order.total_amount + subtotal, 2)
+        order.pay_amount = round(order.pay_amount + subtotal, 2)
+        order.updated_at = datetime.now()
 
-    db.commit()
-    db.refresh(order_item)
-    db.refresh(order)
+        # 记录审计日志
+        client_ip = request.client.host if request and request.client else ""
+        _log_audit(
+            db,
+            action="add_item_to_order",
+            target_type="order",
+            target_id=order.id,
+            detail=f"订单 {order.order_no} 加菜: {dish.name} x{quantity}，金额: ¥{subtotal}",
+            ip_address=client_ip,
+        )
+
+        db.commit()
+        db.refresh(order_item)
+        db.refresh(order)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"加菜失败: {str(e)}",
+        )
 
     return {
         "code": 200,
@@ -762,3 +958,4 @@ def add_item_to_order(
             },
         },
     }
+

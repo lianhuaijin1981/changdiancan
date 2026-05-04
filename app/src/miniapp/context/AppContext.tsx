@@ -1,12 +1,20 @@
 import React, { createContext, useContext, useReducer, useEffect, type ReactNode } from "react";
 import type { CartItem, User, Store, MemberInfo } from "../types";
 
+export interface TableInfo {
+  id: number;
+  table_no: string;
+  capacity: number;
+  status: string;
+}
+
 interface AppState {
   token: string | null;
   user: User | null;
   store: Store | null;
   cart: CartItem[];
   memberInfo: MemberInfo | null;
+  table: TableInfo | null;
 }
 
 type Action =
@@ -18,7 +26,8 @@ type Action =
   | { type: "UPDATE_CART_QTY"; payload: { dishId: number; specId?: number; quantity: number } }
   | { type: "REMOVE_FROM_CART"; payload: { dishId: number; specId?: number } }
   | { type: "CLEAR_CART" }
-  | { type: "SET_MEMBER"; payload: MemberInfo };
+  | { type: "SET_MEMBER"; payload: MemberInfo }
+  | { type: "SET_TABLE"; payload: TableInfo | null };
 
 const initialState: AppState = {
   token: localStorage.getItem("token"),
@@ -40,6 +49,14 @@ const initialState: AppState = {
     }
   })(),
   memberInfo: null,
+  table: (() => {
+    try {
+      const t = localStorage.getItem("table");
+      return t ? JSON.parse(t) : null;
+    } catch {
+      return null;
+    }
+  })(),
 };
 
 function reducer(state: AppState, action: Action): AppState {
@@ -101,6 +118,14 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case "SET_MEMBER":
       return { ...state, memberInfo: action.payload };
+    case "SET_TABLE": {
+      if (action.payload) {
+        localStorage.setItem("table", JSON.stringify(action.payload));
+      } else {
+        localStorage.removeItem("table");
+      }
+      return { ...state, table: action.payload };
+    }
     default:
       return state;
   }

@@ -16,6 +16,7 @@ import {
   Settings,
   Palette,
   Bike,
+  Package,
 } from "lucide-react";
 
 interface StoreInfo {
@@ -77,6 +78,11 @@ export default function SettingsPage() {
   };
 
   const menuItems = [
+    {
+      label: "库存管理",
+      icon: Package,
+      onClick: () => navigate("/merchant/inventory"),
+    },
     {
       label: "小程序模板",
       icon: Palette,

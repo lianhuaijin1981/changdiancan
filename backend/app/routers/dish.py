@@ -1,7 +1,7 @@
 """
 畅点餐 - 菜品管理路由
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import List, Optional
@@ -9,7 +9,8 @@ from typing import List, Optional
 from app.database import get_db
 from app import models, schemas
 from app.models import Dish, Category, Store
-from app.auth import require_auth
+from app.auth import require_auth, get_optional_user
+from app.routers.audit import create_audit_log
 
 router = APIRouter(tags=["菜品"])
 
@@ -149,12 +150,19 @@ def update_dish(
     db: Session = Depends(get_db),
     current_user=Depends(require_auth),
 ):
-    """更新菜品"""
+    """更新菜品（带审计日志）"""
     db_dish = db.query(Dish).filter(Dish.id == id).first()
     if not db_dish:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="菜品不存在"
         )
+
+    old_data = {
+        "name": db_dish.name,
+        "price": db_dish.price,
+        "stock": db_dish.stock,
+        "status": db_dish.status,
+    }
 
     update_data = dish_update.model_dump(exclude_unset=True)
 
@@ -188,6 +196,20 @@ def update_dish(
 
     db.commit()
     db.refresh(db_dish)
+
+    # 记录审计日志
+    update_fields = ", ".join([f"{k}={v}" for k, v in update_data.items()])
+    try:
+        create_audit_log(
+            db,
+            action="update_dish",
+            target_type="dish",
+            target_id=db_dish.id,
+            detail=f"更新菜品 '{db_dish.name}'，修改字段: {update_fields}，修改前: {old_data}",
+            user_id=current_user.id if current_user else None,
+        )
+    except Exception:
+        pass  # 审计日志失败不影响主业务
 
     return {"code": 200, "message": "菜品更新成功", "data": db_dish}
 
@@ -301,7 +323,7 @@ def toggle_featured(
     }
 
 
-@router.get("/featured", response_model=schemas.ResponseModel)
+@router.get("/featured/list", response_model=schemas.ResponseModel)
 def list_featured_dishes(
     store_id: int = Query(..., description="门店ID"),
     db: Session = Depends(get_db),

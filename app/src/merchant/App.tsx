@@ -11,6 +11,7 @@ import Stats from "./pages/Stats";
 import Settings from "./pages/Settings";
 import TemplateSelect from "./pages/TemplateSelect";
 import RiderManage from "./pages/RiderManage";
+import Inventory from "./pages/Inventory";
 import Layout from "./components/Layout";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -34,6 +35,7 @@ export default function MerchantApp() {
         <Route path="settings" element={<Settings />} />
         <Route path="template" element={<TemplateSelect />} />
         <Route path="riders" element={<RiderManage />} />
+        <Route path="inventory" element={<Inventory />} />
       </Route>
     </Routes>
   );

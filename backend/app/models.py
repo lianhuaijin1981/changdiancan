@@ -300,3 +300,18 @@ class Banner(Base):
     sort_order = Column(Integer, default=0)
     status = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.now)
+
+
+class AuditLog(Base):
+    """审计日志表"""
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, comment="操作人ID")
+    user_type = Column(String(20), default="user", comment="用户类型: user/merchant/rider/admin")
+    action = Column(String(50), nullable=False, comment="操作类型: create_order/cancel_order/update_dish/etc")
+    target_type = Column(String(50), default="", comment="目标类型: order/dish/store")
+    target_id = Column(Integer, nullable=True, comment="目标ID")
+    detail = Column(Text, default="", comment="详情(JSON)")
+    ip_address = Column(String(50), default="", comment="IP地址")
+    created_at = Column(DateTime, default=datetime.now)

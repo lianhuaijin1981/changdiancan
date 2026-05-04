@@ -10,6 +10,7 @@ import Orders from "./pages/Orders";
 import Profile from "./pages/Profile";
 import Member from "./pages/Member";
 import Coupons from "./pages/Coupons";
+import ScanTable from "./pages/ScanTable";
 import { Home as HomeIcon, UtensilsCrossed, ClipboardList, User } from "lucide-react";
 import { useEffect } from "react";
 import { api } from "./api/client";
@@ -110,6 +111,7 @@ function AppContent() {
         <Route path="/profile" element={<Profile />} />
         <Route path="/member" element={<Member />} />
         <Route path="/coupons" element={<Coupons />} />
+        <Route path="/scan" element={<ScanTable />} />
       </Routes>
       <TabBar />
       {TAB_ROOTS.includes(useLocation().pathname) && <div className="h-14" />}

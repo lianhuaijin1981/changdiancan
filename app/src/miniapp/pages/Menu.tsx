@@ -7,11 +7,15 @@ import {
   Plus,
   Minus,
   ShoppingCart,
-  X,
-  ChevronUp,
   Tag,
   Trash2,
+  AlertTriangle,
+  MapPin,
 } from "lucide-react";
+
+interface LowStockMap {
+  [dishId: number]: number;
+}
 
 export default function Menu() {
   const navigate = useNavigate();
@@ -23,8 +27,10 @@ export default function Menu() {
   const [cartOpen, setCartOpen] = useState(false);
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [selectedCoupon, setSelectedCoupon] = useState<Coupon | null>(null);
+  const [lowStockMap, setLowStockMap] = useState<LowStockMap>({});
 
   const storeId = state.store?.id || 1;
+  const table = state.table;
 
   useEffect(() => {
     api.get(`/categories/?store_id=${storeId}`).then((cats: Category[]) => {
@@ -33,6 +39,17 @@ export default function Menu() {
     }).catch(() => {});
     api.get(`/dishes/?store_id=${storeId}`).then(setDishes).catch(() => {});
     api.get("/coupons/").then(setCoupons).catch(() => {});
+
+    // Fetch low stock items
+    api.get(`/inventory/low-stock?store_id=${storeId}&threshold=5`)
+      .then((items: any[]) => {
+        const map: LowStockMap = {};
+        items.forEach((item: any) => {
+          map[item.dish_id || item.id] = item.stock;
+        });
+        setLowStockMap(map);
+      })
+      .catch(() => {});
   }, [storeId]);
 
   const filteredDishes = dishes.filter((d) => d.category_id === activeCat);
@@ -65,6 +82,31 @@ export default function Menu() {
     return cart.filter((i) => i.dishId === dishId).reduce((s, i) => s + i.quantity, 0);
   };
 
+  const getDishStock = (dish: Dish): number => {
+    if (dish.stock !== undefined) return dish.stock;
+    return lowStockMap[dish.id] !== undefined ? lowStockMap[dish.id] : 999;
+  };
+
+  const getStockBadge = (dish: Dish) => {
+    const stock = getDishStock(dish);
+    if (stock <= 0) {
+      return (
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-200 text-gray-500 font-medium">
+          已售罄
+        </span>
+      );
+    }
+    if (stock <= 5) {
+      return (
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-600 font-medium flex items-center gap-0.5">
+          <AlertTriangle size={10} />
+          仅剩{stock}份
+        </span>
+      );
+    }
+    return null;
+  };
+
   const discountAmount = selectedCoupon
     ? Math.min(selectedCoupon.discount_amount, cartTotal)
     : 0;
@@ -73,6 +115,15 @@ export default function Menu() {
 
   return (
     <div className="h-[calc(100vh-56px)] flex flex-col bg-gray-100">
+      {/* Table info banner */}
+      {table && (
+        <div className="bg-orange-500 text-white px-4 py-2 flex items-center gap-2 flex-shrink-0">
+          <MapPin size={14} />
+          <span className="text-xs font-medium">当前桌台: {table.table_no}</span>
+          <span className="text-[10px] opacity-80">({table.capacity}人桌)</span>
+        </div>
+      )}
+
       {/* Category + Dish area */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left category list */}
@@ -111,12 +162,15 @@ export default function Menu() {
               </button>
               <div className="flex-1 flex flex-col justify-between">
                 <div>
-                  <h3
-                    className="text-sm font-bold"
-                    onClick={() => navigate(`/dish/${dish.id}`)}
-                  >
-                    {dish.name}
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3
+                      className="text-sm font-bold"
+                      onClick={() => navigate(`/dish/${dish.id}`)}
+                    >
+                      {dish.name}
+                    </h3>
+                    {getStockBadge(dish)}
+                  </div>
                   <p className="text-xs text-gray-400 mt-1 line-clamp-1">
                     {dish.description}
                   </p>
@@ -162,7 +216,12 @@ export default function Menu() {
                           );
                         }
                       }}
-                      className="w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center text-white"
+                      disabled={getDishStock(dish) <= 0}
+                      className={`w-6 h-6 rounded-full flex items-center justify-center text-white transition-colors ${
+                        getDishStock(dish) <= 0
+                          ? "bg-gray-300 cursor-not-allowed"
+                          : "bg-orange-500 active:bg-orange-600"
+                      }`}
                     >
                       <Plus size={14} />
                     </button>
