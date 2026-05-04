@@ -15,6 +15,7 @@ router = APIRouter()
 @router.post("/register", response_model=schemas.ResponseModel)
 async def merchant_register(
     data: schemas.RegisterRequest,
+    template_id: str = "modern",
     db: Session = Depends(get_db),
 ):
     """商家注册：同时创建门店和商家账号"""
@@ -23,13 +24,14 @@ async def merchant_register(
     if existing:
         raise HTTPException(status_code=400, detail="该手机号已被注册")
 
-    # 创建默认门店
+    # 创建默认门店，支持选择模板
     store = models.Store(
         name="我的店铺",
         address="",
         phone=data.phone,
         business_hours="09:00-22:00",
         status=1,
+        template_id=template_id,
     )
     db.add(store)
     db.flush()

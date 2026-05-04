@@ -44,6 +44,7 @@ class Store(Base):
     delivery_fee = Column(Float, default=0.0, comment="配送费")
     min_delivery_amount = Column(Float, default=0.0, comment="起送金额")
     delivery_range = Column(Float, default=5.0, comment="配送范围(km)")
+    template_id = Column(String(20), default="modern", comment="模板ID: modern/traditional/fresh/luxury")
     created_at = Column(DateTime, default=datetime.now)
 
     tables = relationship("Table", back_populates="store", cascade="all, delete")

@@ -1,6 +1,7 @@
 import { HashRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { AppProvider, useApp } from "./context/AppContext";
-import Home from "./pages/Home";
+import { TemplateProvider, useTemplate } from "../templates/TemplateProvider";
+import { TemplateHome } from "../templates/TemplateRenderer";
 import Menu from "./pages/Menu";
 import DishDetail from "./pages/DishDetail";
 import Confirm from "./pages/Confirm";
@@ -25,13 +26,16 @@ const TAB_ROOTS = ["/", "/menu", "/orders", "/profile"];
 function TabBar() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { template } = useTemplate();
 
   const showTabBar = TAB_ROOTS.includes(location.pathname);
-
   if (!showTabBar) return null;
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t z-50 safe-area-bottom">
+    <nav 
+      className="fixed bottom-0 left-0 right-0 border-t z-50 safe-area-bottom"
+      style={{ backgroundColor: 'var(--tmpl-surface)', borderColor: 'var(--tmpl-border)' }}
+    >
       <div className="max-w-[430px] mx-auto flex items-center justify-around h-14">
         {TABS.map((tab) => {
           const isActive = location.pathname === tab.key;
@@ -43,13 +47,15 @@ function TabBar() {
             >
               <tab.icon
                 size={20}
-                className={isActive ? "text-orange-500" : "text-gray-400"}
+                style={{ color: isActive ? 'var(--tmpl-primary)' : 'var(--tmpl-text-muted)' }}
                 strokeWidth={isActive ? 2.5 : 2}
               />
               <span
-                className={`text-[10px] ${
-                  isActive ? "text-orange-500 font-bold" : "text-gray-400"
-                }`}
+                className="text-[10px]"
+                style={{
+                  color: isActive ? 'var(--tmpl-primary)' : 'var(--tmpl-text-muted)',
+                  fontWeight: isActive ? 'bold' : 'normal',
+                }}
               >
                 {tab.label}
               </span>
@@ -63,12 +69,17 @@ function TabBar() {
 
 function AppContent() {
   const { state, dispatch } = useApp();
+  const { setTemplateId } = useTemplate();
 
   useEffect(() => {
     // Load store info on init
     api.get("/stores/").then((res: any) => {
       if (Array.isArray(res) && res.length > 0) {
         dispatch({ type: "SET_STORE", payload: res[0] });
+        // Set template from store
+        if (res[0].template_id) {
+          setTemplateId(res[0].template_id);
+        }
       }
     }).catch(() => {});
 
@@ -79,16 +90,18 @@ function AppContent() {
           dispatch({ type: "SET_AUTH", payload: { token: state.token!, user } });
         }
       }).catch(() => {
-        // Token expired
         dispatch({ type: "CLEAR_AUTH" });
       });
     }
   }, []);
 
   return (
-    <div className="max-w-[430px] mx-auto bg-[#F5F5F5] min-h-screen relative">
+    <div 
+      className="max-w-[430px] mx-auto min-h-screen relative"
+      style={{ backgroundColor: 'var(--tmpl-bg)' }}
+    >
       <Routes>
-        <Route path="/" element={<Home />} />
+        <Route path="/" element={<TemplateHome />} />
         <Route path="/menu" element={<Menu />} />
         <Route path="/dish/:id" element={<DishDetail />} />
         <Route path="/confirm" element={<Confirm />} />
@@ -99,7 +112,6 @@ function AppContent() {
         <Route path="/coupons" element={<Coupons />} />
       </Routes>
       <TabBar />
-      {/* Spacer for tab bar */}
       {TAB_ROOTS.includes(useLocation().pathname) && <div className="h-14" />}
     </div>
   );
@@ -108,9 +120,11 @@ function AppContent() {
 function App() {
   return (
     <AppProvider>
-      <HashRouter>
-        <AppContent />
-      </HashRouter>
+      <TemplateProvider>
+        <HashRouter>
+          <AppContent />
+        </HashRouter>
+      </TemplateProvider>
     </AppProvider>
   );
 }

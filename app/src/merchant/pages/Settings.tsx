@@ -14,6 +14,7 @@ import {
   Shield,
   Info,
   Settings,
+  Palette,
 } from "lucide-react";
 
 interface StoreInfo {
@@ -75,6 +76,11 @@ export default function SettingsPage() {
   };
 
   const menuItems = [
+    {
+      label: "小程序模板",
+      icon: Palette,
+      onClick: () => navigate("/merchant/template"),
+    },
     {
       label: "门店设置",
       icon: Settings,
