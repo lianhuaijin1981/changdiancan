@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5.9% 10%;
+    --radius: 0.625rem;
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+
+    --color-primary: #FF6B35;
+    --color-primary-light: #FF8C61;
+    --color-primary-dark: #E55A2B;
+    --color-accent: #C41E3A;
+    --color-accent-light: #E84866;
+    --color-bg-base: #FFF9F5;
+    --color-bg-card: #FFFFFF;
+    --color-bg-dark: #1A1A2E;
+    --color-bg-elevated: #FFEDE4;
+    --color-text-primary: #1A1A2E;
+    --color-text-secondary: #6B7280;
+    --color-text-muted: #9CA3AF;
+    --color-text-inverse: #FFFFFF;
+    --color-success: #10B981;
+    --color-warning: #F59E0B;
+    --color-info: #3B82F6;
+  }
+
+  body {
+    @apply bg-[#FFF9F5] text-[#1A1A2E] font-body antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display;
+  }
+}
+
+@layer components {
+  .gradient-hero {
+    background: linear-gradient(135deg, #FF6B35 0%, #FF8C61 50%, #FFB088 100%);
+  }
+
+  .gradient-card {
+    background: linear-gradient(180deg, #FFFFFF 0%, #FFF9F5 100%);
+  }
+
+  .gradient-dark {
+    background: linear-gradient(135deg, #1A1A2E 0%, #2D2D44 100%);
+  }
+
+  .gradient-warm {
+    background: radial-gradient(ellipse at top, #FFEDE4 0%, #FFF9F5 70%);
+  }
+
+  .text-gradient-hero {
+    background: linear-gradient(135deg, #FF6B35 0%, #FF8C61 50%, #FFB088 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .container-main {
+    @apply max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8;
+  }
+}
