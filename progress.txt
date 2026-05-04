@@ -51,6 +51,36 @@
 
 ---
 
+## v3.0.0 (2026-05-04)
+
+**重大更新：新增4套小程序模板切换系统**
+
+### 后端新增
+- Store 表新增 `template_id` 字段（默认 modern）
+- 商家注册支持传入 `template_id` 参数
+- 门店 API 支持更新模板配置
+
+### 前端新增：模板系统
+- **模板配置中心** (`src/templates/config.ts`)：4套模板完整配置
+- **TemplateProvider** (`src/templates/TemplateProvider.tsx`)：动态注入CSS变量（颜色/字体/圆角/阴影）
+- **TemplateRenderer** (`src/templates/TemplateRenderer.tsx`)：按模板ID渲染对应首页
+- **4套模板首页**：
+  - `modern` — 简约现代风（暖橙扁平，适合快餐连锁）
+  - `traditional` — 中式传统风（中国红+金色，适合中餐火锅）
+  - `fresh` — 清新文艺风（薄荷绿+马卡龙，适合奶茶轻食）
+  - `luxury` — 高端黑金风（深黑+香槟金，适合日料西餐）
+
+### 商家端新增
+- `/#/merchant/template` — 模板选择页面（4套模板预览+一键切换）
+- 设置页新增「小程序模板」入口
+
+### 架构升级
+- 用户端首页从固定组件改为动态模板渲染
+- TabBar、页面背景色跟随模板CSS变量自动切换
+- 模板切换后用户端立即生效
+
+---
+
 ## 四端入口说明
 
 | 端 | 路径 | 面向用户 | 设备 |
