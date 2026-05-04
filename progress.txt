@@ -81,6 +81,26 @@
 
 ---
 
+## v3.1.0 (2026-05-04)
+
+**更新：新增3套小程序模板**
+
+### 新增模板
+- **日式和风** (`japanese`)：原木质感配靛蓝，大量留白，自然和风
+  - 适用品类：寿司、拉面、居酒屋、定食
+  - 设计特征：serif字体、 thin dividers、自然元素、极简留白
+- **韩式烤肉** (`korean`)：炭黑配火焰红，工业风设计
+  - 适用品类：韩式烤肉、炸鸡、部队锅、韩餐大排档
+  - 设计特征：dark theme、bold typography、红色accent、geometric shapes
+- **东南亚风情** (`southeast`)：热带绿配芒果黄，鲜艳印花感
+  - 适用品类：泰国菜、越南粉、马来菜、印度菜、新加坡菜
+  - 设计特征：vibrant colors、rounded shapes、tropical decorations、spice indicators
+
+### 模板总数
+从4套扩展到 **7套**，覆盖更多餐饮品类
+
+---
+
 ## 四端入口说明
 
 | 端 | 路径 | 面向用户 | 设备 |
