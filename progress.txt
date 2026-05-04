@@ -173,6 +173,42 @@
 
 ---
 
+## v5.0.0 (2026-05-04)
+
+**重大更新：完整修复10项业务功能缺失**
+
+### 后端核心功能修复
+
+| 功能 | 实现 | 说明 |
+|------|------|------|
+| **订单超时自动取消** | APScheduler定时任务 | 每5分钟扫描，30分钟未支付自动取消 |
+| **库存扣减+并发锁** | SELECT FOR UPDATE行级锁 | 下单扣库存，取消/退款回滚，防止超卖 |
+| **审计日志** | AuditLog模型+中间件 | 记录所有关键操作，支持按用户/操作/日期筛选 |
+| **库存预警API** | inventory路由 | 低库存查询、库存汇总、批量更新 |
+| **Excel导出** | openpyxl | 订单导出(13字段)、菜品销售报表，含格式化表头 |
+| **财务报表** | finance路由 | 日报/月报/年报，含支付方式/订单类型/趋势分析 |
+| **云打印框架** | CloudPrinter类 | 对接易联云/飞鹅云打印，订单小票+后厨联 |
+
+### 前端功能修复
+
+| 功能 | 实现 | 说明 |
+|------|------|------|
+| **扫码自动绑定桌台** | ScanTable页面 | URL参数(store_id+table_id)自动绑定 |
+| **菜单库存预警** | Menu.tsx | 低库存显示'仅剩X份'，售罄禁用加购 |
+| **骑手地图导航** | Orders.tsx | 腾讯地图URL调起，一键导航 |
+| **库存管理Dashboard** | Inventory.tsx | 商家端3级库存状态，+-调库存 |
+
+### 新增文件（20个文件，+3080行）
+- `backend/app/routers/audit.py` — 审计日志
+- `backend/app/routers/export.py` — Excel导出
+- `backend/app/routers/finance.py` — 财务报表
+- `backend/app/routers/inventory.py` — 库存管理
+- `backend/app/utils/print_service.py` — 云打印框架
+- `app/src/miniapp/pages/ScanTable.tsx` — 扫码绑定桌台
+- `app/src/merchant/pages/Inventory.tsx` — 库存管理页
+
+---
+
 ## 六端入口说明
 
 | 端 | 路径 | 面向用户 | 设备 |
