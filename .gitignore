@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Build outputs
+app/dist/
+build/
+*.egg-info/
+
+# Database & Uploads (runtime generated)
+canting.db
+*.db
+*.sqlite
+*.sqlite3
+uploads/
+
+# Environment
+.env
+.venv
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+nohup.out
+
+# Git inside subdirectories (will use top-level git)
+**/.git/

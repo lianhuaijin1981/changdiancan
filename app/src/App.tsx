@@ -7,6 +7,7 @@ import Demo from './pages/Demo'
 import Contact from './pages/Contact'
 import MiniAppShell from './miniapp'
 import AdminShell from './admin'
+import MerchantShell from './merchant'
 
 export default function App() {
   return (
@@ -23,6 +24,8 @@ export default function App() {
       <Route path="/app/*" element={<MiniAppShell />} />
       {/* Admin dashboard */}
       <Route path="/admin/*" element={<AdminShell />} />
+      {/* Merchant mobile management */}
+      <Route path="/merchant/*" element={<MerchantShell />} />
     </Routes>
   )
 }

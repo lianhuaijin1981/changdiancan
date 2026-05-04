@@ -168,7 +168,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 # 注册路由
-from app.routers import auth, store, table, category, dish, order, member, coupon, activity, payment, rider, staff, dashboard
+from app.routers import auth, store, table, category, dish, order, member, coupon, activity, payment, rider, staff, dashboard, merchant
 
 app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
 app.include_router(store.router, prefix="/api/stores", tags=["门店"])
@@ -183,6 +183,7 @@ app.include_router(payment.router, prefix="/api/payment", tags=["支付"])
 app.include_router(rider.router, prefix="/api/riders", tags=["骑手"])
 app.include_router(staff.router, prefix="/api/staff", tags=["店员"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["数据统计"])
+app.include_router(merchant.router, prefix="/api/merchant", tags=["商家"])
 
 
 @app.get("/")
