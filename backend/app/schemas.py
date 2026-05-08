@@ -1,10 +1,14 @@
 """
 畅点餐 - Pydantic 数据校验模型
+安全加固版本：增强输入验证、添加 refresh_token schema
 """
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+import re
 
+
+# ============== 通用响应 ==============
 
 class ResponseModel(BaseModel):
     """通用响应模型"""
@@ -16,23 +20,59 @@ class ResponseModel(BaseModel):
 # ============== 认证相关 ==============
 
 class RegisterRequest(BaseModel):
-    phone: str = Field(..., min_length=11, max_length=11)
-    password: str = Field(..., min_length=6)
-    nickname: Optional[str] = ""
+    """注册请求 - 增强验证"""
+    phone: str = Field(
+        ...,
+        min_length=11,
+        max_length=11,
+        description="手机号，必须是11位数字"
+    )
+    password: str = Field(
+        ...,
+        min_length=6,
+        max_length=128,
+        description="密码，6-128位"
+    )
+    nickname: Optional[str] = Field(None, max_length=50)
+
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        """验证手机号格式"""
+        if not re.match(r'^1[3-9]\d{9}$', v):
+            raise ValueError('手机号格式不正确')
+        return v
+
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        """密码强度检查"""
+        if len(v) < 6:
+            raise ValueError('密码长度不能少于6位')
+        return v
 
 
 class LoginRequest(BaseModel):
-    phone: str
-    password: str
+    """登录请求 - 增强验证"""
+    phone: str = Field(..., min_length=11, max_length=11)
+    password: str = Field(..., min_length=1, max_length=128)
 
 
 class WechatLoginRequest(BaseModel):
-    code: str
+    """微信登录请求"""
+    code: str = Field(..., min_length=1, max_length=128)
     userInfo: Optional[Dict[str, Any]] = None
 
 
+class RefreshTokenRequest(BaseModel):
+    """刷新 Token 请求"""
+    refresh_token: str = Field(..., min_length=1, description="Refresh Token")
+
+
 class TokenResponse(BaseModel):
+    """认证响应"""
     access_token: str
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
     expires_in: int
     user: Dict[str, Any]
@@ -53,28 +93,31 @@ class UserResponse(BaseModel):
 
 
 class UserUpdateRequest(BaseModel):
-    nickname: Optional[str] = None
-    avatar: Optional[str] = None
+    """更新用户资料"""
+    nickname: Optional[str] = Field(None, max_length=50)
+    avatar: Optional[str] = Field(None, max_length=500)
 
 
 # ============== 门店相关 ==============
 
 class StoreCreate(BaseModel):
+    """创建门店"""
     name: str = Field(..., min_length=1, max_length=100)
-    address: Optional[str] = ""
-    phone: Optional[str] = ""
-    business_hours: Optional[str] = "09:00-22:00"
-    logo: Optional[str] = ""
-    description: Optional[str] = ""
-    delivery_fee: Optional[float] = 0.0
-    min_delivery_amount: Optional[float] = 0.0
-    delivery_range: Optional[float] = 5.0
+    address: Optional[str] = Field(None, max_length=200)
+    phone: Optional[str] = Field(None, max_length=20)
+    business_hours: Optional[str] = Field(None, max_length=50)
+    logo: Optional[str] = Field(None, max_length=500)
+    description: Optional[str] = Field(None, max_length=500)
+    delivery_fee: Optional[float] = Field(0.0, ge=0)
+    min_delivery_amount: Optional[float] = Field(0.0, ge=0)
+    delivery_range: Optional[float] = Field(5.0, ge=0)
 
 
 class StoreUpdate(StoreCreate):
-    name: Optional[str] = None
-    status: Optional[int] = None
-    announcement: Optional[str] = ""
+    """更新门店"""
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    status: Optional[int] = Field(None, ge=0, le=1)
+    announcement: Optional[str] = Field(None, max_length=500)
 
 
 class StoreResponse(BaseModel):
@@ -97,15 +140,17 @@ class StoreResponse(BaseModel):
 # ============== 桌台相关 ==============
 
 class TableCreate(BaseModel):
-    store_id: int
-    table_no: str
-    capacity: Optional[int] = 4
+    """创建桌台"""
+    store_id: int = Field(..., gt=0)
+    table_no: str = Field(..., min_length=1, max_length=20)
+    capacity: Optional[int] = Field(4, ge=1, le=50)
 
 
 class TableUpdate(BaseModel):
-    table_no: Optional[str] = None
-    capacity: Optional[int] = None
-    status: Optional[str] = None
+    """更新桌台"""
+    table_no: Optional[str] = Field(None, min_length=1, max_length=20)
+    capacity: Optional[int] = Field(None, ge=1, le=50)
+    status: Optional[str] = Field(None, max_length=20)
 
 
 class TableResponse(BaseModel):
@@ -121,15 +166,17 @@ class TableResponse(BaseModel):
 # ============== 分类相关 ==============
 
 class CategoryCreate(BaseModel):
-    store_id: int
-    name: str
-    sort_order: Optional[int] = 0
-    icon: Optional[str] = ""
+    """创建分类"""
+    store_id: int = Field(..., gt=0)
+    name: str = Field(..., min_length=1, max_length=50)
+    sort_order: Optional[int] = Field(0, ge=0)
+    icon: Optional[str] = Field(None, max_length=50)
 
 
 class CategoryUpdate(CategoryCreate):
+    """更新分类"""
     store_id: Optional[int] = None
-    name: Optional[str] = None
+    name: Optional[str] = Field(None, min_length=1, max_length=50)
 
 
 class CategoryResponse(BaseModel):
@@ -145,25 +192,27 @@ class CategoryResponse(BaseModel):
 # ============== 菜品相关 ==============
 
 class DishCreate(BaseModel):
-    store_id: int
-    category_id: int
-    name: str
-    description: Optional[str] = ""
-    image: Optional[str] = ""
-    price: float = Field(..., gt=0)
-    original_price: Optional[float] = 0.0
-    stock: Optional[int] = 999
-    specs: Optional[List[Dict[str, Any]]] = []
-    tags: Optional[List[str]] = []
+    """创建菜品"""
+    store_id: int = Field(..., gt=0)
+    category_id: int = Field(..., gt=0)
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = Field(None, max_length=500)
+    image: Optional[str] = Field(None, max_length=500)
+    price: float = Field(..., gt=0, le=99999)
+    original_price: Optional[float] = Field(0.0, ge=0, le=99999)
+    stock: Optional[int] = Field(999, ge=0)
+    specs: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+    tags: Optional[List[str]] = Field(default_factory=list)
     is_featured: Optional[bool] = False
 
 
 class DishUpdate(DishCreate):
+    """更新菜品"""
     store_id: Optional[int] = None
     category_id: Optional[int] = None
     name: Optional[str] = None
     price: Optional[float] = None
-    status: Optional[int] = None
+    status: Optional[int] = Field(None, ge=0, le=1)
 
 
 class DishResponse(BaseModel):
@@ -188,13 +237,15 @@ class DishResponse(BaseModel):
 # ============== 购物车相关 ==============
 
 class CartItem(BaseModel):
-    dish_id: int
-    quantity: int = Field(default=1, ge=1)
-    specs: Optional[Dict[str, str]] = {}
-    remark: Optional[str] = ""
+    """购物车项"""
+    dish_id: int = Field(..., gt=0)
+    quantity: int = Field(default=1, ge=1, le=99)
+    specs: Optional[Dict[str, str]] = Field(default_factory=dict)
+    remark: Optional[str] = Field(None, max_length=200)
 
 
 class CartItemDetail(CartItem):
+    """购物车项详情"""
     dish_name: str
     dish_image: str
     price: float
@@ -204,17 +255,17 @@ class CartItemDetail(CartItem):
 # ============== 订单相关 ==============
 
 class OrderCreateRequest(BaseModel):
-    store_id: int
+    """创建订单"""
+    store_id: int = Field(..., gt=0)
     table_id: Optional[int] = None
-    order_type: str = "dine_in"  # dine_in, takeaway, delivery
-    items: List[CartItem]
+    order_type: str = Field("dine_in", max_length=20)
+    items: List[CartItem] = Field(..., min_length=1)
     coupon_id: Optional[int] = None
-    remark: Optional[str] = ""
-    pay_type: Optional[str] = "wechat"
-    # 外卖信息
-    delivery_name: Optional[str] = ""
-    delivery_phone: Optional[str] = ""
-    delivery_address: Optional[str] = ""
+    remark: Optional[str] = Field(None, max_length=200)
+    pay_type: Optional[str] = Field("wechat", max_length=20)
+    delivery_name: Optional[str] = Field(None, max_length=50)
+    delivery_phone: Optional[str] = Field(None, max_length=20)
+    delivery_address: Optional[str] = Field(None, max_length=200)
 
 
 class OrderItemResponse(BaseModel):
@@ -256,15 +307,17 @@ class OrderResponse(BaseModel):
 
 
 class OrderStatusUpdate(BaseModel):
-    status: str
+    """更新订单状态"""
+    status: str = Field(..., min_length=1, max_length=20)
 
 
 class OrderQuery(BaseModel):
+    """订单查询"""
     status: Optional[str] = None
     order_type: Optional[str] = None
     store_id: Optional[int] = None
-    page: int = 1
-    page_size: int = 20
+    page: int = Field(1, ge=1)
+    page_size: int = Field(20, ge=1, le=100)
 
 
 # ============== 会员相关 ==============
@@ -279,8 +332,9 @@ class MemberLevelResponse(BaseModel):
 
 
 class RechargeRequest(BaseModel):
-    amount: float = Field(..., gt=0)
-    pay_type: str = "wechat"
+    """储值充值"""
+    amount: float = Field(..., gt=0, le=100000)
+    pay_type: str = Field("wechat", max_length=20)
 
 
 class PointsLogResponse(BaseModel):
@@ -295,13 +349,14 @@ class PointsLogResponse(BaseModel):
 # ============== 优惠券相关 ==============
 
 class CouponCreate(BaseModel):
+    """创建优惠券"""
     store_id: Optional[int] = None
-    title: str
-    type: str = "amount"  # amount, discount, percent
-    min_amount: Optional[float] = 0.0
-    discount_amount: Optional[float] = 0.0
-    total_count: Optional[int] = 0
-    limit_per_user: Optional[int] = 1
+    title: str = Field(..., min_length=1, max_length=100)
+    type: str = Field("amount", max_length=20)
+    min_amount: Optional[float] = Field(0.0, ge=0)
+    discount_amount: Optional[float] = Field(0.0, ge=0)
+    total_count: Optional[int] = Field(0, ge=0)
+    limit_per_user: Optional[int] = Field(1, ge=1)
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
 
@@ -323,6 +378,7 @@ class CouponResponse(BaseModel):
 
 
 class UserCouponResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     coupon_id: int
     title: str
@@ -338,10 +394,11 @@ class UserCouponResponse(BaseModel):
 # ============== 活动相关 ==============
 
 class ActivityCreate(BaseModel):
+    """创建活动"""
     store_id: Optional[int] = None
-    title: str
-    type: str = "seckill"
-    config: Optional[Dict[str, Any]] = {}
+    title: str = Field(..., min_length=1, max_length=100)
+    type: str = Field("seckill", max_length=20)
+    config: Optional[Dict[str, Any]] = None
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
 
@@ -361,8 +418,9 @@ class ActivityResponse(BaseModel):
 # ============== 支付相关 ==============
 
 class UnifiedOrderRequest(BaseModel):
-    order_no: str
-    pay_type: str = "wechat"
+    """统一下单"""
+    order_no: str = Field(..., min_length=1, max_length=50)
+    pay_type: str = Field("wechat", max_length=20)
 
 
 class PaymentResponse(BaseModel):
@@ -380,13 +438,15 @@ class PaymentResponse(BaseModel):
 # ============== 骑手相关 ==============
 
 class RiderLogin(BaseModel):
-    phone: str
-    password: str
+    """骑手登录"""
+    phone: str = Field(..., min_length=11, max_length=11)
+    password: str = Field(..., min_length=1)
 
 
 class RiderUpdateLocation(BaseModel):
-    lat: float
-    lng: float
+    """更新骑手位置"""
+    lat: float = Field(..., ge=-90, le=90)
+    lng: float = Field(..., ge=-180, le=180)
 
 
 class DeliveryOrderResponse(BaseModel):
@@ -404,8 +464,9 @@ class DeliveryOrderResponse(BaseModel):
 # ============== 店员相关 ==============
 
 class StaffLogin(BaseModel):
-    phone: str
-    password: str
+    """店员登录"""
+    phone: str = Field(..., min_length=11, max_length=11)
+    password: str = Field(..., min_length=1)
 
 
 # ============== 数据统计相关 ==============
@@ -444,13 +505,14 @@ class MemberStats(BaseModel):
 # ============== 审计日志相关 ==============
 
 class AuditLogCreate(BaseModel):
+    """创建审计日志"""
     user_id: Optional[int] = None
-    user_type: Optional[str] = "user"
+    user_type: Optional[str] = Field("user", max_length=20)
     action: str = Field(..., min_length=1, max_length=50)
-    target_type: Optional[str] = ""
+    target_type: Optional[str] = Field(None, max_length=50)
     target_id: Optional[int] = None
-    detail: Optional[str] = ""
-    ip_address: Optional[str] = ""
+    detail: Optional[str] = Field(None, max_length=500)
+    ip_address: Optional[str] = Field(None, max_length=50)
 
 
 class AuditLogResponse(BaseModel):
@@ -469,11 +531,13 @@ class AuditLogResponse(BaseModel):
 # ============== 库存相关 ==============
 
 class InventoryLowStockFilter(BaseModel):
-    store_id: int
-    threshold: Optional[int] = 10
+    """库存预警查询"""
+    store_id: int = Field(..., gt=0)
+    threshold: Optional[int] = Field(10, ge=1)
 
 
 class InventorySummary(BaseModel):
+    """库存汇总"""
     store_id: int
     total_items: int
     low_stock_count: int
@@ -482,17 +546,19 @@ class InventorySummary(BaseModel):
 
 
 class StockUpdateRequest(BaseModel):
-    quantity: int = Field(..., ge=0, description="新库存数量")
+    """更新库存"""
+    quantity: int = Field(..., ge=0, le=999999, description="新库存数量")
 
 
 # ============== 轮播图相关 ==============
 
 class BannerCreate(BaseModel):
+    """创建轮播图"""
     store_id: Optional[int] = None
-    title: Optional[str] = ""
-    image: str
-    link: Optional[str] = ""
-    sort_order: Optional[int] = 0
+    title: Optional[str] = Field(None, max_length=100)
+    image: str = Field(..., min_length=1, max_length=500)
+    link: Optional[str] = Field(None, max_length=500)
+    sort_order: Optional[int] = Field(0, ge=0)
 
 
 class BannerResponse(BaseModel):

@@ -2,174 +2,94 @@
 
 ---
 
-## v1.0.0 (2026-05-04)
+## v5.1.0 (2026-05-08)
 
-**初始版本：完整餐饮小程序解决方案**
+**安全加固版本：修复高优先级和中优先级差距**
 
-### 前端
-- 营销展示网站 (React + Tailwind + Framer Motion)
-  - 首页 / 功能页 / 定价页 / 演示页 / 联系页
-- 用户端小程序H5 (React + Context API)
-  - 扫码点餐 / 菜品详情 / 购物车 / 结算 / 支付 / 订单追踪 / 会员 / 优惠券
-- 商家管理后台PC端 (React + shadcn/ui + Recharts)
-  - Dashboard / 门店 / 桌台 / 菜品 / 订单 / 优惠券 / 会员
+### 后端安全加固
 
-### 后端
-- FastAPI + SQLAlchemy + SQLite
-- 13个路由模块，70+ RESTful API
-- 18张数据库表，预置24道演示菜品
-- 模拟微信支付流程
-- JWT认证 + 密码加密
+| 功能 | 实现方式 | 状态 |
+|------|----------|------|
+| **CORS 白名单** | 配置化白名单，默认禁用 `*` | ✅ |
+| **请求限流** | slowapi 中间件，按接口类型限流 | ✅ |
+| **Refresh Token** | 双 Token 机制，30天有效期 | ✅ |
+| **数据库连接池** | MySQL 连接池配置（pool_size=10） | ✅ |
+| **输入长度限制** | Pydantic 字段加 `max_length` | ✅ |
+| **日志中间件** | 请求/响应日志记录 | ✅ |
+| **全局异常处理** | 统一异常响应，生产环境隐藏详情 | ✅ |
 
----
+### 后端配置文件更新
 
-## v2.0.0 (2026-05-04)
+- `app/config.py` - 添加：
+  - `ENV_MODE` 环境模式
+  - `CORS_ORIGINS` 白名单配置
+  - `REFRESH_TOKEN_EXPIRE_DAYS` / `REFRESH_TOKEN_SECRET_KEY`
+  - `RATE_LIMIT_PER_MINUTE` 等限流配置
+  - `DB_POOL_*` 连接池配置
 
-**重大更新：新增商家手机管理端**
+- `app/database.py` - 优化：
+  - 支持 MySQL 连接池
+  - SQLite WAL 模式优化
+  - 添加 `check_db_connection()` 健康检查
 
-### 后端新增
-- `POST /api/merchant/register` — 商家注册（同时创建默认门店）
-- `POST /api/merchant/login` — 商家登录
-- `GET /api/merchant/me` — 获取当前商家信息
-- `GET /api/merchant/dashboard` — 工作台数据概览（今日订单、营收、待处理、桌台占用、本周营收）
+- `app/schemas.py` - 增强：
+  - 所有字段添加 `max_length` 限制
+  - 数值字段添加 `ge/le` 范围校验
+  - 手机号格式正则验证
+  - 密码强度检查
+  - 添加 `RefreshTokenRequest` schema
 
-### 前端新增：商家手机管理端 (8页面)
-- `/#/merchant/login` — 商家登录页
-- `/#/merchant/register` — 商家注册页（创建门店+账号）
-- `/#/merchant` — 工作台首页（4大数据卡片 + 快捷入口 + 最近订单）
-- `/#/merchant/orders` — 订单管理（状态筛选 + 接单/制作/上菜/完成操作）
-- `/#/merchant/dishes` — 菜品管理（分类筛选 + 上下架 + 库存调整）
-- `/#/merchant/tables` — 桌台管理（可视化网格 + 状态切换）
-- `/#/merchant/stats` — 经营数据（营收趋势图表 + 热销排行）
-- `/#/merchant/settings` — 设置页（门店信息 + 营业状态开关 + 退出登录）
+- `app/auth.py` - 增强：
+  - `create_refresh_token()` 新函数
+  - `verify_refresh_token()` 验证函数
+  - Token 类型区分（access/refresh）
+  - 向后兼容的 `verify_token()`
 
-### 架构调整
-- 前端统一为单项目多入口：`/`(营销)、`/#/app`(用户端)、`/#/merchant`(商家端)、`/#/admin`(PC后台)
-- 新增 `MerchantContext` 商家状态管理
-- 新增 `merchant/api/client.ts` 商家API客户端（独立token管理）
-- 移动端适配：max-width 430px 居中，底部Tab导航
+- `app/routers/auth.py` - 增强：
+  - 注册/登录添加限流注解
+  - 新增 `/api/auth/refresh` 端点
+  - 返回 Token 包含 `refresh_token`
+  - 详细错误信息
 
----
+- `app/main.py` - 重构：
+  - 引入 slowapi 限流器
+  - 添加请求日志中间件
+  - CORS 配置使用白名单
+  - 统一异常处理
+  - 健康检查添加数据库连接状态
 
-## v3.0.0 (2026-05-04)
+### 前端性能优化
 
-**重大更新：新增4套小程序模板切换系统**
+| 功能 | 实现方式 | 状态 |
+|------|----------|------|
+| **路由级代码分割** | React.lazy + Suspense | ✅ |
+| **Error Boundary** | 全局错误边界组件 | ✅ |
+| **加载动画** | 自定义 PageLoader 组件 | ✅ |
+| **独立 Error Fallback** | 各路由独立错误降级 | ✅ |
 
-### 后端新增
-- Store 表新增 `template_id` 字段（默认 modern）
-- 商家注册支持传入 `template_id` 参数
-- 门店 API 支持更新模板配置
+### 前端文件变更
 
-### 前端新增：模板系统
-- **模板配置中心** (`src/templates/config.ts`)：4套模板完整配置
-- **TemplateProvider** (`src/templates/TemplateProvider.tsx`)：动态注入CSS变量（颜色/字体/圆角/阴影）
-- **TemplateRenderer** (`src/templates/TemplateRenderer.tsx`)：按模板ID渲染对应首页
-- **4套模板首页**：
-  - `modern` — 简约现代风（暖橙扁平，适合快餐连锁）
-  - `traditional` — 中式传统风（中国红+金色，适合中餐火锅）
-  - `fresh` — 清新文艺风（薄荷绿+马卡龙，适合奶茶轻食）
-  - `luxury` — 高端黑金风（深黑+香槟金，适合日料西餐）
+- `src/components/ErrorBoundary.tsx` - 新增：
+  - 捕获渲染错误
+  - 降级 UI 显示
+  - 开发模式显示错误详情
 
-### 商家端新增
-- `/#/merchant/template` — 模板选择页面（4套模板预览+一键切换）
-- 设置页新增「小程序模板」入口
+- `src/App.tsx` - 重构：
+  - 所有页面组件改为懒加载
+  - 添加 Suspense 包装
+  - 各路由独立 ErrorBoundary
+  - 自定义 PageLoader 加载动画
 
-### 架构升级
-- 用户端首页从固定组件改为动态模板渲染
-- TabBar、页面背景色跟随模板CSS变量自动切换
-- 模板切换后用户端立即生效
+### 新增文档
 
----
+| 文档 | 说明 |
+|------|------|
+| `docs/mysql-migration.md` | MySQL 迁移完整指南 |
 
-## v3.1.0 (2026-05-04)
+### 依赖更新
 
-**更新：新增3套小程序模板**
-
-### 新增模板
-- **日式和风** (`japanese`)：原木质感配靛蓝，大量留白，自然和风
-  - 适用品类：寿司、拉面、居酒屋、定食
-  - 设计特征：serif字体、 thin dividers、自然元素、极简留白
-- **韩式烤肉** (`korean`)：炭黑配火焰红，工业风设计
-  - 适用品类：韩式烤肉、炸鸡、部队锅、韩餐大排档
-  - 设计特征：dark theme、bold typography、红色accent、geometric shapes
-- **东南亚风情** (`southeast`)：热带绿配芒果黄，鲜艳印花感
-  - 适用品类：泰国菜、越南粉、马来菜、印度菜、新加坡菜
-  - 设计特征：vibrant colors、rounded shapes、tropical decorations、spice indicators
-
-### 模板总数
-从4套扩展到 **7套**，覆盖更多餐饮品类
-
----
-
-## v4.0.0 (2026-05-04)
-
-**重大更新：超级管理员后台 + 骑手端 + 商家骑手管理**
-
-### 超级管理员后台 (PC端)
-- `/#/superadmin` — 总后台仪表盘
-- 平台级数据统计：商家总数、今日订单、今日营收、平台总用户
-- 商家管理：所有商家列表、搜索/筛选/分页、启用/禁用商家账号
-- 数据统计：平台营收趋势图、模板分布饼图、TOP10商家排行
-- 认证：超级管理员账号（Staff 表 `role: "superadmin"）
-
-### 骑手端简化版 (移动端H5)
-- `/#/rider` — 骑手专属配送端
-- 登录：手机号+密码，只能看到所属门店订单
-- 订单列表：全部/待接单/配送中/已完成，自动刷新
-- 接单 → 到店取餐 → 确认送达 完整流程
-- 核心设计：骑手只能看到**所属门店**的外卖订单，无法跨店
-
-### 商家端骑手管理
-- `/#/merchant/riders` — 添加骑手/查看骑手列表
-- 骑手自动绑定到商家门店（store_id）
-
-### 后端新增API
-- `superadmin/dashboard` — 平台仪表盘
-- `superadmin/stores` — 商家列表
-- `superadmin/revenue-trend` — 营收趋势
-- `superadmin/top-stores` — 商家排行
-- `riders/login` — 骑手登录（绑定store_id）
-- `riders/orders` — 仅限本店订单
-- `riders/orders/{id}/accept` — 接单
-- `riders/orders/{id}/pickup` — 到店取餐
-- `riders/orders/{id}/deliver` — 确认送达
-
----
-
-## v4.1.0 (2026-05-04)
-
-**更新：完整微信支付模块**
-
-### 后端微信支付核心 (WxPay)
-- **签名工具**：支持 MD5 和 HMAC-SHA256 签名算法
-- **统一下单**：对接微信 `pay/unifiedorder`，支持 JSAPI/H5 支付
-- **回调验签**：自动验证微信支付回调签名，防止伪造
-- **订单查询**：`pay/orderquery` 主动查询支付状态
-- **退款**：`secapi/pay/refund` 支持部分/全额退款（需商户证书）
-- **关单**：`pay/closeorder` 关闭未支付订单
-- **XML工具**：字典↔XML互转，适配微信协议
-
-### 支付路由完整版
-- `POST /payment/unified-order` — 统一下单，返回 prepay_id + 前端调起参数
-- `POST /payment/notify` — 接收微信回调通知，自动更新订单状态
-- `GET /payment/status/{order_no}` — 查询支付状态
-- `POST /payment/refund` — 申请退款
-- `POST /payment/close/{order_no}` — 关闭未支付订单
-
-### 前端支付页升级
-- 支持 **微信支付JSAPI**：微信浏览器内调起原生支付
-- 支持 **H5支付**：非微信浏览器跳转支付
-- 支持 **余额支付**：使用会员余额
-- **模拟支付模式**：开发测试用，无商户号也能演示支付流程
-- 支付成功/失败状态页，订单详情展示
-
-### 文档
-- `docs/wechat-pay-setup.md` — 完整微信支付配置指南
-  - 商户号注册步骤
-  - 参数配置说明
-  - API接口文档
-  - 常见问题解答
-  - 费率说明
+- `requirements.txt` - 新增：
+  - `slowapi==0.1.9` 限流中间件
 
 ---
 
@@ -198,14 +118,50 @@
 | **骑手地图导航** | Orders.tsx | 腾讯地图URL调起，一键导航 |
 | **库存管理Dashboard** | Inventory.tsx | 商家端3级库存状态，+-调库存 |
 
-### 新增文件（20个文件，+3080行）
-- `backend/app/routers/audit.py` — 审计日志
-- `backend/app/routers/export.py` — Excel导出
-- `backend/app/routers/finance.py` — 财务报表
-- `backend/app/routers/inventory.py` — 库存管理
-- `backend/app/utils/print_service.py` — 云打印框架
-- `app/src/miniapp/pages/ScanTable.tsx` — 扫码绑定桌台
-- `app/src/merchant/pages/Inventory.tsx` — 库存管理页
+---
+
+## v4.1.0 (2026-05-04)
+
+**更新：完整微信支付模块**
+
+### 后端微信支付核心 (WxPay)
+- **签名工具**：支持 MD5 和 HMAC-SHA256 签名算法
+- **统一下单**：对接微信 `pay/unifiedorder`，支持 JSAPI/H5 支付
+- **回调验签**：自动验证微信支付回调签名，防止伪造
+- **订单查询**：`pay/orderquery` 主动查询支付状态
+- **退款**：`secapi/pay/refund` 支持部分/全额退款（需商户证书）
+- **关单**：`pay/closeorder` 关闭未支付订单
+- **XML工具**：字典↔XML互转，适配微信协议
+
+---
+
+## v4.0.0 (2026-05-04)
+
+**重大更新：超级管理员后台 + 骑手端 + 商家骑手管理**
+
+---
+
+## v3.1.0 (2026-05-04)
+
+**更新：新增3套小程序模板**
+
+---
+
+## v3.0.0 (2026-05-04)
+
+**重大更新：4套小程序模板切换系统**
+
+---
+
+## v2.0.0 (2026-05-04)
+
+**重大更新：商家手机管理端**
+
+---
+
+## v1.0.0 (2026-05-04)
+
+**初始版本：完整餐饮小程序解决方案**
 
 ---
 
@@ -215,8 +171,10 @@
 |----|------|----------|------|
 | 营销网站 | `/` | 潜在客户 | PC/手机 |
 | 用户端H5 | `/#/app` | 消费者 | 手机 |
-| **商家手机端** | `/#/merchant` | **老板/店员** | **手机** |
+| 商家手机端 | `/#/merchant` | 老板/店员 | 手机 |
 | PC管理后台 | `/#/admin` | 高级管理员 | PC |
+| 骑手端 | `/#/rider` | 配送骑手 | 手机 |
+| 超级管理员 | `/#/superadmin` | 平台运营 | PC |
 
 ---
 
@@ -229,4 +187,4 @@
 
 ---
 
-*文档最后更新：2026-05-04*
+*文档最后更新：2026-05-08*

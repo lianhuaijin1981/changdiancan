@@ -1,11 +1,14 @@
 """
 畅点餐 - 认证路由
-处理用户注册、登录、微信登录及个人信息管理
+处理用户注册、登录、Token刷新、微信登录及个人信息管理
+安全加固版本：支持 refresh_token 刷新机制
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
-from typing import Optional, Dict, Any
-
+from typing import Optional
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from app.config import get_settings
 from app.database import get_db
 from app import schemas
 from app.models import User, MemberLevel
@@ -13,24 +16,69 @@ from app.auth import (
     get_password_hash,
     verify_password,
     create_access_token,
+    create_refresh_token,
+    verify_access_token,
+    verify_refresh_token,
     require_auth,
     get_optional_user,
 )
 
+settings = get_settings()
 router = APIRouter(tags=["认证"])
+
+# 限流器实例（在 main.py 中初始化）
+limiter = Limiter(key_func=get_remote_address)
+
+
+# ---- 辅助函数 ----
+
+def _build_token_response(user: User, include_refresh: bool = False) -> schemas.TokenResponse:
+    """构建 Token 响应"""
+    access_token = create_access_token(data={"sub": str(user.id)})
+
+    resp_data = {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES,
+        "user": {
+            "id": user.id,
+            "phone": user.phone or "",
+            "nickname": user.nickname,
+            "avatar": user.avatar,
+            "member_level_id": user.member_level_id,
+        },
+    }
+
+    if include_refresh:
+        refresh_token = create_refresh_token(data={"sub": str(user.id)})
+        resp_data["refresh_token"] = refresh_token
+
+    return schemas.TokenResponse(**resp_data)
+
+
+def _check_phone_exists(db: Session, phone: str, exclude_id: int = None) -> bool:
+    """检查手机号是否已注册"""
+    query = db.query(User).filter(User.phone == phone)
+    if exclude_id:
+        query = query.filter(User.id != exclude_id)
+    return query.first() is not None
 
 
 # ---- 注册 ----
 
 @router.post("/register", response_model=schemas.TokenResponse)
-def register(
+@limiter.limit(f"{settings.RATE_LIMIT_AUTH_PER_MINUTE}/minute")  # 认证接口限流
+async def register(
+    request: Request,
     req: schemas.RegisterRequest,
     db: Session = Depends(get_db),
 ):
-    """手机号 + 密码注册"""
+    """
+    手机号 + 密码注册
+    限流：每分钟最多 {RATE_LIMIT_AUTH_PER_MINUTE} 次
+    """
     # 检查手机号是否已注册
-    existing = db.query(User).filter(User.phone == req.phone).first()
-    if existing:
+    if _check_phone_exists(db, req.phone):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="该手机号已注册",
@@ -40,37 +88,30 @@ def register(
     user = User(
         phone=req.phone,
         password_hash=get_password_hash(req.password),
-        nickname=req.nickname or req.phone[-4:],
+        nickname=req.nickname or f"用户{req.phone[-4:]}",
         member_level_id=1,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
 
-    # 生成 JWT Token
-    access_token = create_access_token(data={"sub": str(user.id)})
-    return schemas.TokenResponse(
-        access_token=access_token,
-        token_type="bearer",
-        expires_in=1440,  # 24h = 1440 分钟
-        user={
-            "id": user.id,
-            "phone": user.phone,
-            "nickname": user.nickname,
-            "avatar": user.avatar,
-            "member_level_id": user.member_level_id,
-        },
-    )
+    # 生成 Token（包含 refresh_token）
+    return _build_token_response(user, include_refresh=True)
 
 
 # ---- 登录 ----
 
 @router.post("/login", response_model=schemas.TokenResponse)
-def login(
+@limiter.limit(f"{settings.RATE_LIMIT_AUTH_PER_MINUTE}/minute")  # 认证接口限流
+async def login(
+    request: Request,
     req: schemas.LoginRequest,
     db: Session = Depends(get_db),
 ):
-    """手机号 + 密码登录"""
+    """
+    手机号 + 密码登录
+    限流：每分钟最多 {RATE_LIMIT_AUTH_PER_MINUTE} 次
+    """
     user = db.query(User).filter(User.phone == req.phone).first()
     if not user:
         raise HTTPException(
@@ -88,25 +129,49 @@ def login(
             detail="手机号或密码错误",
         )
 
-    access_token = create_access_token(data={"sub": str(user.id)})
-    return schemas.TokenResponse(
-        access_token=access_token,
-        token_type="bearer",
-        expires_in=1440,
-        user={
-            "id": user.id,
-            "phone": user.phone,
-            "nickname": user.nickname,
-            "avatar": user.avatar,
-            "member_level_id": user.member_level_id,
-        },
-    )
+    # 生成 Token（包含 refresh_token）
+    return _build_token_response(user, include_refresh=True)
+
+
+# ---- Token 刷新 ----
+
+@router.post("/refresh", response_model=schemas.TokenResponse)
+@limiter.limit(f"{settings.RATE_LIMIT_AUTH_PER_MINUTE}/minute")
+async def refresh_token(
+    request: Request,
+    req: schemas.RefreshTokenRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    使用 Refresh Token 获取新的 Access Token
+    限流：每分钟最多 {RATE_LIMIT_AUTH_PER_MINUTE} 次
+    """
+    # 验证 refresh_token
+    user_id = verify_refresh_token(req.refresh_token)
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh Token 无效或已过期，请重新登录",
+        )
+
+    # 获取用户
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="用户不存在",
+        )
+
+    # 生成新的 Token 对（返回新的 refresh_token 以支持 refresh_token 轮换）
+    return _build_token_response(user, include_refresh=True)
 
 
 # ---- 微信登录（模拟） ----
 
 @router.post("/wechat-login", response_model=schemas.TokenResponse)
-def wechat_login(
+@limiter.limit(f"{settings.RATE_LIMIT_AUTH_PER_MINUTE}/minute")
+async def wechat_login(
+    request: Request,
     req: schemas.WechatLoginRequest,
     db: Session = Depends(get_db),
 ):
@@ -150,25 +215,14 @@ def wechat_login(
             db.commit()
             db.refresh(user)
 
-    access_token = create_access_token(data={"sub": str(user.id)})
-    return schemas.TokenResponse(
-        access_token=access_token,
-        token_type="bearer",
-        expires_in=1440,
-        user={
-            "id": user.id,
-            "phone": user.phone or "",
-            "nickname": user.nickname,
-            "avatar": user.avatar,
-            "member_level_id": user.member_level_id,
-        },
-    )
+    # 生成 Token（包含 refresh_token）
+    return _build_token_response(user, include_refresh=True)
 
 
 # ---- 获取当前用户信息 ----
 
 @router.get("/me", response_model=schemas.UserResponse)
-def get_me(
+async def get_me(
     user: User = Depends(require_auth),
 ):
     """获取当前登录用户信息"""
@@ -178,7 +232,7 @@ def get_me(
 # ---- 更新个人信息 ----
 
 @router.put("/me", response_model=schemas.UserResponse)
-def update_me(
+async def update_me(
     req: schemas.UserUpdateRequest,
     user: User = Depends(require_auth),
     db: Session = Depends(get_db),

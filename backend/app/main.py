@@ -1,29 +1,74 @@
 """
 畅点餐 - FastAPI 主入口
+安全加固版本：CORS白名单 + 请求限流 + 日志中间件
 """
 import os
 import sys
-from fastapi import FastAPI, Request
+import time
+import logging
+from datetime import datetime
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from contextlib import asynccontextmanager
-from datetime import datetime
 
 # 将 backend 加入路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.config import get_settings
+from app.config import get_settings, get_cors_origins
 from app.database import init_db
-from app.models import Store, MemberLevel
 
 settings = get_settings()
 
+# ── 限流器初始化 ───────────────────────────────────────────────
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=[f"{settings.RATE_LIMIT_PER_MINUTE}/minute"],
+    storage_uri="memory://" if settings.REDIS_ENABLED else "memory://",
+)
 
+# ── 日志配置 ───────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO if not settings.DEBUG else logging.DEBUG,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger("changdiancan")
+
+
+# ── 请求日志中间件 ─────────────────────────────────────────────
+async def log_requests_middleware(request: Request, call_next):
+    """记录所有 API 请求日志"""
+    start_time = time.time()
+
+    # 记录请求
+    logger.info(
+        f"请求: {request.method} {request.url.path} "
+        f"from {get_remote_address(request)}"
+    )
+
+    response = await call_next(request)
+
+    # 记录响应
+    process_time = time.time() - start_time
+    logger.info(
+        f"响应: {request.method} {request.url.path} "
+        f"status={response.status_code} duration={process_time:.3f}s"
+    )
+
+    # 添加响应头
+    response.headers["X-Process-Time"] = str(process_time)
+
+    return response
+
+
+# ── 默认数据初始化 ─────────────────────────────────────────────
 async def init_default_data():
     """初始化默认数据"""
     from app.database import SessionLocal
     from app.models import Store, MemberLevel, Category, Dish, Banner
-    import random
 
     db = SessionLocal()
     try:
@@ -40,7 +85,7 @@ async def init_default_data():
             status=1,
             logo="",
             description="畅点餐官方体验店，提供各类精品美食",
-            announcement="\u4e0a 新店开业全场8折！会员充值满100送20！",
+            announcement="新店开业全场8折！会员充值满100送20！",
             delivery_fee=5.0,
             min_delivery_amount=20.0,
             delivery_range=5.0,
@@ -131,7 +176,7 @@ async def init_default_data():
         db.close()
 
 
-# ========== APScheduler: 自动取消超时订单 ==========
+# ── APScheduler: 自动取消超时订单 ──────────────────────────────
 from apscheduler.schedulers.background import BackgroundScheduler
 
 scheduler = BackgroundScheduler()
@@ -155,28 +200,23 @@ def auto_cancel_timeout_orders():
         cancelled_count = 0
         for order in orders:
             # 回滚库存
-            items = (
-                db.query(OrderItem)
-                .filter(OrderItem.order_id == order.id)
-                .all()
-            )
+            items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
             for item in items:
                 dish = db.query(Dish).filter(Dish.id == item.dish_id).first()
                 if dish:
                     dish.stock += item.quantity
 
             order.status = "cancelled"
-            order.cancel_reason = "\u8d85\u65f6\u672a\u652f\u4ed8\uff0c\u7cfb\u7edf\u81ea\u52a8\u53d6\u6d88"
+            order.cancel_reason = "超时未支付，系统自动取消"
             order.updated_at = datetime.now()
             cancelled_count += 1
 
         if cancelled_count > 0:
             db.commit()
-            print(f"[AutoCancel] {datetime.now().isoformat()} - "
-                  f"\u81ea\u52a8\u53d6\u6d88 {cancelled_count} \u4e2a\u8d85\u65f6\u672a\u652f\u4ed8\u8ba2\u5355")
+            logger.info(f"[AutoCancel] 自动取消 {cancelled_count} 个超时未支付订单")
     except Exception as e:
         db.rollback()
-        print(f"[AutoCancel] Error: {e}")
+        logger.error(f"[AutoCancel] Error: {e}")
     finally:
         db.close()
 
@@ -197,44 +237,62 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
     )
     scheduler.start()
-    print("[Scheduler] \u5b9a\u65f6\u4efb\u52a1\u5df2\u542f\u52a8")
+    logger.info("[Scheduler] 定时任务已启动")
 
     yield
 
     # 关闭时清理
     scheduler.shutdown()
-    print("[Scheduler] \u5b9a\u65f6\u4efb\u52a1\u5df2\u5173\u95ed")
+    logger.info("[Scheduler] 定时任务已关闭")
 
 
-# 创建 FastAPI 应用
+# ── 创建 FastAPI 应用 ──────────────────────────────────────────
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    description="畅点餐 - 餐饮小程序完整后端 API",
+    description="畅点餐 - 餐饮小程序完整后端 API (安全加固版)",
     lifespan=lifespan,
 )
 
-# CORS 中间件
+# 添加限流器状态到 app state
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# ── CORS 中间件（安全配置）─────────────────────────────────────
+cors_origins = get_cors_origins()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,  # 不再使用 *，使用白名单
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["X-Process-Time"],  # 暴露自定义响应头
 )
 
+# ── 请求日志中间件 ─────────────────────────────────────────────
+app.middleware("http")(log_requests_middleware)
 
-# 全局异常处理
+
+# ── 全局异常处理 ───────────────────────────────────────────────
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"[GlobalException] {request.method} {request.url.path}: {exc}")
     return JSONResponse(
         status_code=500,
-        content={"code": 500, "message": str(exc), "data": None},
+        content={
+            "code": 500,
+            "message": "服务器内部错误，请稍后重试",
+            "data": None if settings.ENV_MODE == "production" else str(exc)
+        },
     )
 
 
-# 注册路由
-from app.routers import auth, store, table, category, dish, order, member, coupon, activity, payment, rider, staff, dashboard, merchant, superadmin, audit, inventory, export, finance
+# ── 注册路由 ──────────────────────────────────────────────────
+from app.routers import (
+    auth, store, table, category, dish, order, member, coupon,
+    activity, payment, rider, staff, dashboard, merchant, superadmin,
+    audit, inventory, export, finance
+)
 
 app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
 app.include_router(store.router, prefix="/api/stores", tags=["门店"])
@@ -257,18 +315,30 @@ app.include_router(export.router, prefix="/api/export", tags=["导出"])
 app.include_router(finance.router, prefix="/api/finance", tags=["财务报表"])
 
 
+# ── 健康检查与根路由 ──────────────────────────────────────────
 @app.get("/")
 async def root():
-    return {"message": "畅点餐 API 服务运行中", "version": settings.APP_VERSION}
+    return {
+        "message": "畅点餐 API 服务运行中",
+        "version": settings.APP_VERSION,
+        "mode": settings.ENV_MODE,
+    }
 
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+    """健康检查接口"""
+    from app.database import check_db_connection
+
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "db_connected": check_db_connection(),
+        "mode": settings.ENV_MODE,
+    }
 
 
-# ── 打印测试 ────────────────────────────────────────────────────
-
+# ── 打印测试 ──────────────────────────────────────────────────
 @app.post("/api/print/test")
 async def print_test(
     provider: str = Query("yilianyun", description="打印服务商: yilianyun/feie"),
@@ -289,8 +359,7 @@ async def print_test(
                 "status": "demo",
                 "provider": provider,
                 "machine_code": machine_code or "未设置",
-                "note": "请在环境变量中配置 CLOUD_PRINT_API_KEY 和 CLOUD_PRINT_API_SECRET 以启用真实打印",
-                "env_vars": ["CLOUD_PRINT_API_KEY", "CLOUD_PRINT_API_SECRET", "CLOUD_PRINT_PROVIDER"],
+                "note": "请在环境变量中配置 CLOUD_PRINT_API_KEY 和 CLOUD_PRINT_API_SECRET",
             },
         }
 
